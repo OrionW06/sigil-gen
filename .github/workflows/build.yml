@@ -1,0 +1,51 @@
+name: Build and Release
+
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu]
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          target: ${{ matrix.target }}
+      
+      - name: Install Windows target
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          rustup target add x86_64-pc-windows-gnu
+      
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --target ${{ matrix.target }}
+      
+      - name: Rename Linux binary
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          mkdir -p release
+          cp target/x86_64-unknown-linux-gnu/release/sigil-gen release/sigil-gen-linux
+      
+      - name: Rename Windows binary
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: |
+          mkdir -p release
+          cp target/x86_64-pc-windows-gnu/release/sigil-gen.exe release/sigil-gen-windows.exe
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: sigil-gen-binaries
+          path: release/
