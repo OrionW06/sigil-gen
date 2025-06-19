@@ -6,64 +6,76 @@ on:
       - 'v*'  # Trigger on version tags (e.g., v1.0.0)
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu]
     steps:
       - uses: actions/checkout@v4
-        id: checkout
       
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev
-          if [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ]; then
-            sudo apt-get install -y gcc-mingw-w64-x86-64
-          fi
       
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          target: ${{ matrix.target }}
-      
-      - name: Add Windows target
-        if: matrix.target == 'x86_64-pc-windows-gnu'
-        run: rustup target add x86_64-pc-windows-gnu
+          target: x86_64-unknown-linux-gnu
       
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --target ${{ matrix.target }}
+        run: cargo build --release --target x86_64-unknown-linux-gnu
       
-      - name: Prepare artifacts
+      - name: Prepare artifact
         run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
           mkdir -p release
-          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            cp target/x86_64-unknown-linux-gnu/release/sigil-gen "release/sigil-gen-linux-$SHORT_SHA"
-          elif [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ]; then
-            cp target/x86_64-pc-windows-gnu/release/sigil-gen.exe "release/sigil-gen-windows-$SHORT_SHA.exe"
-          fi
+          cp target/x86_64-unknown-linux-gnu/release/sigil-gen "release/sigil-gen-linux-$SHORT_SHA"
       
-      - name: Upload artifacts
+      - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}-binaries
+          name: linux-binary
           path: release/
 
-  create-release:
-    needs: build
+  build-windows:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Download all artifacts
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: x86_64-pc-windows-gnu
+      
+      - name: Add Windows target
+        run: rustup target add x86_64-pc-windows-gnu
+      
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-gnu
+      
+      - name: Prepare artifact
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          mkdir -p release
+          cp target/x86_64-pc-windows-gnu/release/sigil-gen.exe "release/sigil-gen-windows-$SHORT_SHA.exe"
+      
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: release/
+
+  create-release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -80,10 +92,11 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
           body: |
-            Built from commit ${{ github.sha }}
-            Binaries tagged with short SHA: ${{ github.sha | substr(0, 7) }}
+            ## Version ${{ steps.version.outputs.version }}
+            Built from commit [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            Short commit hash: ${{ github.sha | substr(0, 7) }}
           files: |
-            artifacts/x86_64-unknown-linux-gnu-binaries/*
-            artifacts/x86_64-pc-windows-gnu-binaries/*
+            artifacts/linux-binary/*
+            artifacts/windows-binary/*
           draft: false
           prerelease: false
