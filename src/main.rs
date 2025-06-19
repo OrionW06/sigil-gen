@@ -480,7 +480,7 @@ impl SigilApp {
     fn draw_start(&self) {
         let center = self.get_center();
         draw_text_ex(
-            "CHAOS SIGIL GENERATOR",
+            "SIGIL GENERATOR",
             center.x - 200.0,
             center.y - 50.0,
             TextParams {

@@ -99,14 +99,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 
 [[package]]
-name = "chaos-sigil-generator"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "macroquad",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -444,6 +436,14 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "sigil-gen"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "macroquad",
+]
 
 [[package]]
 name = "simd-adler32"
