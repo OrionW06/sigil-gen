@@ -13,3 +13,6 @@ lto = true
 panic = "abort"
 codegen-units = 1
 strip = true
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "winbase"] }
