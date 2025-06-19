@@ -6,3 +6,10 @@ edition = "2021"
 [dependencies]
 chrono = "0.4"
 macroquad = "0.3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true
