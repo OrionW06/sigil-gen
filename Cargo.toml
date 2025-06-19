@@ -1,8 +1,8 @@
 [package]
-name = "sigil-gen"
+name = "chaos-sigil-generator"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-chrono = "0.4.41"
-macroquad = "0.4"
+chrono = "0.4"
+macroquad = "0.3"

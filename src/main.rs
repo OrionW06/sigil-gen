@@ -30,6 +30,8 @@ struct SigilApp {
     points: Vec<SigilPoint>,
     blink_timer: f32,
     save_timer: f32,
+    cursor_pos: usize,
+    selection_start: Option<usize>,
 }
 
 impl SigilApp {
@@ -40,6 +42,8 @@ impl SigilApp {
             points: Vec::new(),
             blink_timer: 0.0,
             save_timer: 0.0,
+            cursor_pos: 0,
+            selection_start: None,
         }
     }
 
@@ -60,11 +64,11 @@ impl SigilApp {
         let vowels = "aeiouAEIOU";
         let mut seen = HashSet::new();
         let filtered: String = self.intention
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() && !vowels.contains(*c))
-        .map(|c| c.to_ascii_lowercase())
-        .filter(|c| seen.insert(*c))
-        .collect();
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() && !vowels.contains(*c))
+            .map(|c| c.to_ascii_lowercase())
+            .filter(|c| seen.insert(*c))
+            .collect();
 
         if filtered.is_empty() {
             return;
@@ -72,13 +76,13 @@ impl SigilApp {
 
         // Convert to numbers and shuffle
         let mut numbers: Vec<u8> = filtered
-        .chars()
-        .map(|c| if c.is_ascii_digit() {
-            c as u8 - b'0'
-        } else {
-            (c as u8 - b'a') % 10
-        })
-        .collect();
+            .chars()
+            .map(|c| if c.is_ascii_digit() {
+                c as u8 - b'0'
+            } else {
+                (c as u8 - b'a') % 10
+            })
+            .collect();
 
         // Fisher-Yates shuffle
         for i in (1..numbers.len()).rev() {
@@ -88,8 +92,8 @@ impl SigilApp {
 
         // Generate points with random angles - store as relative positions
         let mut angles: Vec<f32> = (0..numbers.len())
-        .map(|i| (i as f32 / numbers.len() as f32) * 2.0 * PI)
-        .collect();
+            .map(|i| (i as f32 / numbers.len() as f32) * 2.0 * PI)
+            .collect();
 
         // Add randomness
         for angle in &mut angles {
@@ -103,15 +107,15 @@ impl SigilApp {
         }
 
         self.points = numbers
-        .into_iter()
-        .zip(angles)
-        .map(|(num, angle)| {
-            SigilPoint {
-                relative_pos: vec2(angle.cos(), angle.sin()) * CIRCLE_RADIUS,
-             number: num,
-            }
-        })
-        .collect();
+            .into_iter()
+            .zip(angles)
+            .map(|(num, angle)| {
+                SigilPoint {
+                    relative_pos: vec2(angle.cos(), angle.sin()) * CIRCLE_RADIUS,
+                    number: num,
+                }
+            })
+            .collect();
 
         self.state = State::Display;
     }
@@ -126,9 +130,9 @@ impl SigilApp {
         // Generate filename
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
         let sanitized_intention = self.intention
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect::<String>();
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect::<String>();
         let filename = format!("{}/sigil_{}_{}.svg", dir, timestamp, sanitized_intention);
 
         // Create SVG
@@ -143,55 +147,242 @@ impl SigilApp {
         writeln!(file, "<svg width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\" xmlns=\"http://www.w3.org/2000/svg\">",
                  svg_size, svg_size, svg_size, svg_size)?;
 
-                 // Background (black) - comment out this line to remove black background
-                 // writeln!(file, "<rect width=\"100%\" height=\"100%\" fill=\"black\" />")?;
+        // Background (black) - comment out this line to remove black background
+        // writeln!(file, "<rect width=\"100%\" height=\"100%\" fill=\"black\" />")?;
 
-                 // Outer circle - properly centered
-                 writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" stroke=\"gray\" stroke-width=\"3\" fill=\"none\" />",
-                          svg_center, svg_center, CIRCLE_RADIUS)?;
+        // Outer circle - properly centered
+        writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" stroke=\"gray\" stroke-width=\"3\" fill=\"none\" />",
+                 svg_center, svg_center, CIRCLE_RADIUS)?;
 
-                          // Transform points from relative coordinates to SVG coordinates
-                          let transform_point = |relative_pos: Vec2| -> (f32, f32) {
-                              (svg_center + relative_pos.x, svg_center + relative_pos.y)
-                          };
+        // Transform points from relative coordinates to SVG coordinates
+        let transform_point = |relative_pos: Vec2| -> (f32, f32) {
+            (svg_center + relative_pos.x, svg_center + relative_pos.y)
+        };
 
-                          // Sigil lines
-                          if self.points.len() > 1 {
-                              let points_str: Vec<String> = self.points.iter()
-                              .map(|p| {
-                                  let (x, y) = transform_point(p.relative_pos);
-                                  format!("{},{}", x, y)
-                              })
-                              .collect();
+        // Sigil lines
+        if self.points.len() > 1 {
+            let points_str: Vec<String> = self.points.iter()
+                .map(|p| {
+                    let (x, y) = transform_point(p.relative_pos);
+                    format!("{},{}", x, y)
+                })
+                .collect();
 
-                              writeln!(file, "<polyline points=\"{}\" fill=\"none\" stroke=\"#87ceeb\" stroke-width=\"3\" />",
-                                       points_str.join(" "))?;
-                          }
+            writeln!(file, "<polyline points=\"{}\" fill=\"none\" stroke=\"#87ceeb\" stroke-width=\"3\" />",
+                     points_str.join(" "))?;
+        }
 
-                          // Only draw start and end points (no numbers)
-                          if !self.points.is_empty() {
-                              // Start point (green)
-                              let (start_x, start_y) = transform_point(self.points[0].relative_pos);
-                              writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"10\" fill=\"green\" />",
-                                       start_x, start_y)?;
+        // Only draw start and end points (no numbers)
+        if !self.points.is_empty() {
+            // Start point (green)
+            let (start_x, start_y) = transform_point(self.points[0].relative_pos);
+            writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"10\" fill=\"green\" />",
+                     start_x, start_y)?;
 
-                                       // End point (red) - only if there's more than one point
-                                       if self.points.len() > 1 {
-                                           let last_idx = self.points.len() - 1;
-                                           let (end_x, end_y) = transform_point(self.points[last_idx].relative_pos);
-                                           writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"10\" fill=\"red\" />",
-                                                    end_x, end_y)?;
-                                       }
-                          }
+            // End point (red) - only if there's more than one point
+            if self.points.len() > 1 {
+                let last_idx = self.points.len() - 1;
+                let (end_x, end_y) = transform_point(self.points[last_idx].relative_pos);
+                writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"10\" fill=\"red\" />",
+                         end_x, end_y)?;
+            }
+        }
 
-                          // Intention text at bottom
-                          writeln!(file, "<text x=\"{}\" y=\"{}\" font-size=\"20\" text-anchor=\"middle\" fill=\"black\">{}</text>",
-                                   svg_center, svg_size - 30.0, self.intention)?;
+        // Intention text at bottom
+        writeln!(file, "<text x=\"{}\" y=\"{}\" font-size=\"20\" text-anchor=\"middle\" fill=\"black\">{}</text>",
+                 svg_center, svg_size - 30.0, self.intention)?;
 
-                                   // Close SVG
-                                   writeln!(file, "</svg>")?;
+        // Close SVG
+        writeln!(file, "</svg>")?;
 
-                                   Ok(())
+        Ok(())
+    }
+
+    fn handle_text_input(&mut self) {
+        // Handle character input
+        while let Some(ch) = get_char_pressed() {
+            if ch.is_ascii_alphanumeric() || ch == ' ' {
+                // Delete selection if any
+                if let Some(start) = self.selection_start {
+                    let (start, end) = if start < self.cursor_pos {
+                        (start, self.cursor_pos)
+                    } else {
+                        (self.cursor_pos, start)
+                    };
+                    self.intention.drain(start..end);
+                    self.cursor_pos = start;
+                    self.selection_start = None;
+                }
+
+                // Insert character at cursor position
+                if self.intention.len() < 100 {
+                    self.intention.insert(self.cursor_pos, ch);
+                    self.cursor_pos += 1;
+                }
+            }
+        }
+
+        // Handle special keys
+        if is_key_pressed(KeyCode::Backspace) {
+            if let Some(start) = self.selection_start {
+                // Delete selection
+                let (start, end) = if start < self.cursor_pos {
+                    (start, self.cursor_pos)
+                } else {
+                    (self.cursor_pos, start)
+                };
+                self.intention.drain(start..end);
+                self.cursor_pos = start;
+                self.selection_start = None;
+            } else if self.cursor_pos > 0 {
+                // Delete character before cursor
+                self.cursor_pos -= 1;
+                self.intention.remove(self.cursor_pos);
+            }
+        }
+
+        if is_key_pressed(KeyCode::Delete) {
+            if let Some(start) = self.selection_start {
+                // Delete selection
+                let (start, end) = if start < self.cursor_pos {
+                    (start, self.cursor_pos)
+                } else {
+                    (self.cursor_pos, start)
+                };
+                self.intention.drain(start..end);
+                self.cursor_pos = start;
+                self.selection_start = None;
+            } else if self.cursor_pos < self.intention.len() {
+                // Delete character after cursor
+                self.intention.remove(self.cursor_pos);
+            }
+        }
+
+        // Handle cursor movement
+        if is_key_pressed(KeyCode::Left) {
+            if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
+                // Start or extend selection
+                if self.cursor_pos > 0 {
+                    self.cursor_pos -= 1;
+                    if self.selection_start.is_none() {
+                        self.selection_start = Some(self.cursor_pos + 1);
+                    }
+                }
+            } else {
+                // Move cursor without selection
+                if self.cursor_pos > 0 {
+                    self.cursor_pos -= 1;
+                }
+                self.selection_start = None;
+            }
+        }
+
+        if is_key_pressed(KeyCode::Right) {
+            if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
+                // Start or extend selection
+                if self.cursor_pos < self.intention.len() {
+                    if self.selection_start.is_none() {
+                        self.selection_start = Some(self.cursor_pos);
+                    }
+                    self.cursor_pos += 1;
+                }
+            } else {
+                // Move cursor without selection
+                if self.cursor_pos < self.intention.len() {
+                    self.cursor_pos += 1;
+                }
+                self.selection_start = None;
+            }
+        }
+
+        // Handle Home/End keys
+        if is_key_pressed(KeyCode::Home) {
+            if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
+                if self.selection_start.is_none() {
+                    self.selection_start = Some(self.cursor_pos);
+                }
+            } else {
+                self.selection_start = None;
+            }
+            self.cursor_pos = 0;
+        }
+
+        if is_key_pressed(KeyCode::End) {
+            if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
+                if self.selection_start.is_none() {
+                    self.selection_start = Some(self.cursor_pos);
+                }
+            } else {
+                self.selection_start = None;
+            }
+            self.cursor_pos = self.intention.len();
+        }
+
+        // Handle Ctrl+A (Select All)
+        if is_key_pressed(KeyCode::A) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
+            self.selection_start = Some(0);
+            self.cursor_pos = self.intention.len();
+        }
+
+        // Handle Ctrl+C (Copy)
+        if is_key_pressed(KeyCode::C) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
+            if let Some(start) = self.selection_start {
+                let (start, end) = if start < self.cursor_pos {
+                    (start, self.cursor_pos)
+                } else {
+                    (self.cursor_pos, start)
+                };
+                let selected_text = &self.intention[start..end];
+                // Note: In a real application, you'd use the system clipboard here
+                // For now, we'll just print it to console
+                println!("Copied: {}", selected_text);
+            }
+        }
+
+        // Handle Ctrl+V (Paste)
+        if is_key_pressed(KeyCode::V) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
+            // Note: In a real application, you'd get text from the system clipboard here
+            // For now, we'll just insert a placeholder
+            let paste_text = "pasted_text"; // This would come from clipboard
+            if self.intention.len() + paste_text.len() <= 100 {
+                // Delete selection if any
+                if let Some(start) = self.selection_start {
+                    let (start, end) = if start < self.cursor_pos {
+                        (start, self.cursor_pos)
+                    } else {
+                        (self.cursor_pos, start)
+                    };
+                    self.intention.drain(start..end);
+                    self.cursor_pos = start;
+                    self.selection_start = None;
+                }
+
+                // Insert pasted text
+                for ch in paste_text.chars() {
+                    if ch.is_ascii_alphanumeric() || ch == ' ' {
+                        self.intention.insert(self.cursor_pos, ch);
+                        self.cursor_pos += 1;
+                    }
+                }
+            }
+        }
+
+        // Handle Ctrl+X (Cut)
+        if is_key_pressed(KeyCode::X) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
+            if let Some(start) = self.selection_start {
+                let (start, end) = if start < self.cursor_pos {
+                    (start, self.cursor_pos)
+                } else {
+                    (self.cursor_pos, start)
+                };
+                let selected_text = &self.intention[start..end];
+                // Note: In a real application, you'd copy to system clipboard here
+                println!("Cut: {}", selected_text);
+                self.intention.drain(start..end);
+                self.cursor_pos = start;
+                self.selection_start = None;
+            }
+        }
     }
 
     fn update(&mut self) {
@@ -205,10 +396,8 @@ impl SigilApp {
             }
         }
 
-        // Consume character input in all states to prevent unwanted text entry
         match &mut self.state {
             State::Start => {
-                // Consume any character input to prevent it from being used later
                 while get_char_pressed().is_some() {}
 
                 if is_key_pressed(KeyCode::Space) {
@@ -216,25 +405,13 @@ impl SigilApp {
                 }
             }
             State::Input => {
-                // Handle text input ONLY when in Input state
-                while let Some(ch) = get_char_pressed() {
-                    if ch.is_ascii_alphanumeric() || ch == ' ' {
-                        if self.intention.len() < 100 {
-                            self.intention.push(ch);
-                        }
-                    }
-                }
-
-                if is_key_pressed(KeyCode::Backspace) {
-                    self.intention.pop();
-                }
+                self.handle_text_input();
 
                 if is_key_pressed(KeyCode::Enter) && !self.intention.trim().is_empty() {
                     self.generate_sigil();
                 }
             }
             State::Display => {
-                // Consume any character input to prevent it from being used later
                 while get_char_pressed().is_some() {}
 
                 if is_key_pressed(KeyCode::Space) && self.points.len() > 1 {
@@ -249,7 +426,6 @@ impl SigilApp {
                 }
             }
             State::Animating { progress, line } => {
-                // Consume any character input to prevent it from being used later
                 while get_char_pressed().is_some() {}
 
                 *progress += get_frame_time() * ANIMATION_SPEED;
@@ -262,7 +438,6 @@ impl SigilApp {
                 }
             }
             State::Saving => {
-                // Consume any character input to prevent it from being used later
                 while get_char_pressed().is_some() {}
             }
         }
@@ -272,7 +447,9 @@ impl SigilApp {
         self.state = State::Input;
         self.intention.clear();
         self.points.clear();
-        self.blink_timer = 0.0; // Reset blink timer so cursor starts fresh
+        self.blink_timer = 0.0;
+        self.cursor_pos = 0;
+        self.selection_start = None;
     }
 
     fn draw(&self) {
@@ -334,14 +511,54 @@ impl SigilApp {
             },
         );
 
-        // Text input with cursor
+        // Text input with cursor and selection
         let cursor = if (self.blink_timer * 2.0) as i32 % 2 == 0 { "|" } else { " " };
-        let display_text = format!("{}{}", self.intention, cursor);
-
+        
+        // Draw the text with selection highlighting
+        let text_x = center.x - 200.0;
+        let text_y = center.y - 100.0;
+        
+        // Draw selection background if any
+        if let Some(selection_start) = self.selection_start {
+            let (start, end) = if selection_start < self.cursor_pos {
+                (selection_start, self.cursor_pos)
+            } else {
+                (self.cursor_pos, selection_start)
+            };
+            
+            let before_selection = &self.intention[..start];
+            let selection_text = &self.intention[start..end];
+            
+            let before_width = measure_text(before_selection, None, 20, 1.0).width;
+            let selection_width = measure_text(selection_text, None, 20, 1.0).width;
+            
+            draw_rectangle(
+                text_x + before_width,
+                text_y - 15.0,
+                selection_width,
+                25.0,
+                Color::from_rgba(100, 150, 255, 100),
+            );
+        }
+        
+        // Draw the text
         draw_text_ex(
-            &display_text,
-            center.x - 200.0,
-            center.y - 100.0,
+            &self.intention,
+            text_x,
+            text_y,
+            TextParams {
+                font_size: 20,
+                color: YELLOW,
+                ..Default::default()
+            },
+        );
+        
+        // Draw cursor
+        let cursor_x = text_x + measure_text(&self.intention[..self.cursor_pos], None, 20, 1.0).width;
+        draw_text_ex(
+            cursor,
+            cursor_x,
+            text_y,
             TextParams {
                 font_size: 20,
                 color: YELLOW,
@@ -436,11 +653,11 @@ impl SigilApp {
                 "SPACE: Animate | R: Reset | S: Save",
                 20.0,
                 screen_height() - 30.0,
-                         TextParams {
-                             font_size: 16,
-                             color: LIGHTGRAY,
-                             ..Default::default()
-                         },
+                TextParams {
+                    font_size: 16,
+                    color: LIGHTGRAY,
+                    ..Default::default()
+                },
             );
         }
     }
