@@ -12,35 +12,32 @@ const ANIMATION_SPEED: f32 = 3.0; // Speed of the sigil drawing animation
 /// Represents a point in the sigil, with a relative position and a number label
 #[derive(Clone)]
 struct SigilPoint {
-    // Position relative to the center of the circle
     relative_pos: Vec2,
-    // The number associated with this point (0-9)
     number: u8,
 }
 
 /// Enum for the different states of the application
 #[derive(Clone)]
 enum State {
-    Start,      // Initial screen
-    Input,      // User is entering their intention
-    Display,    // Sigil is displayed
-    Animating { progress: f32, line: usize }, // Sigil is being animated
-    Saving,     // Sigil is being saved
+    Start,
+    Input,
+    Display,
+    Animating { progress: f32, line: usize },
+    Saving,
 }
 
 /// Main application struct holding all state
 struct SigilApp {
-    state: State,                // Current state of the app
-    intention: String,           // User's intention text
-    points: Vec<SigilPoint>,     // Points that make up the sigil
-    blink_timer: f32,            // Timer for blinking cursor
-    save_timer: f32,             // Timer for save message
-    cursor_pos: usize,           // Cursor position in the input string
-    selection_start: Option<usize>, // Start of text selection (if any)
+    state: State,
+    intention: String,
+    points: Vec<SigilPoint>,
+    blink_timer: f32,
+    save_timer: f32,
+    cursor_pos: usize,
+    selection_start: Option<usize>,
 }
 
 impl SigilApp {
-    /// Create a new SigilApp with default state
     fn new() -> Self {
         Self {
             state: State::Start,
@@ -53,23 +50,19 @@ impl SigilApp {
         }
     }
 
-    /// Get the center of the screen as a Vec2
     fn get_center(&self) -> Vec2 {
         vec2(screen_width() / 2.0, screen_height() / 2.0)
     }
 
-    /// Convert a SigilPoint's relative position to an absolute screen position
     fn get_absolute_pos(&self, point: &SigilPoint) -> Vec2 {
         self.get_center() + point.relative_pos
     }
 
-    /// Generate the sigil points from the user's intention
     fn generate_sigil(&mut self) {
         if self.intention.trim().is_empty() {
             return;
         }
 
-        // Remove vowels and duplicate characters from the intention
         let vowels = "aeiouAEIOU";
         let mut seen = HashSet::new();
         let filtered: String = self.intention
@@ -83,7 +76,6 @@ impl SigilApp {
             return;
         }
 
-        // Convert filtered characters to numbers (0-9)
         let mut numbers: Vec<u8> = filtered
             .chars()
             .map(|c| if c.is_ascii_digit() {
@@ -93,29 +85,24 @@ impl SigilApp {
             })
             .collect();
 
-        // Shuffle the numbers using Fisher-Yates
         for i in (1..numbers.len()).rev() {
             let j = rand::gen_range(0, i + 1);
             numbers.swap(i, j);
         }
 
-        // Generate random angles for each point
         let mut angles: Vec<f32> = (0..numbers.len())
             .map(|i| (i as f32 / numbers.len() as f32) * 2.0 * PI)
             .collect();
 
-        // Add randomness to the angles
         for angle in &mut angles {
             *angle += rand::gen_range(-0.2, 0.2);
         }
 
-        // Shuffle the angles
         for i in (1..angles.len()).rev() {
             let j = rand::gen_range(0, i + 1);
             angles.swap(i, j);
         }
 
-        // Create the sigil points from the numbers and angles
         self.points = numbers
             .into_iter()
             .zip(angles)
@@ -130,15 +117,12 @@ impl SigilApp {
         self.state = State::Display;
     }
 
-    /// Save the current sigil as an SVG file
     fn save_sigil(&self) -> std::io::Result<()> {
-        // Create output directory if it doesn't exist
         let dir = "sigils";
         if !Path::new(dir).exists() {
             std::fs::create_dir(dir)?;
         }
 
-        // Generate a filename with timestamp and sanitized intention
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
         let sanitized_intention = self.intention
             .chars()
@@ -146,28 +130,22 @@ impl SigilApp {
             .collect::<String>();
         let filename = format!("{}/sigil_{}_{}.svg", dir, timestamp, sanitized_intention);
 
-        // Create SVG file
         let mut file = File::create(filename)?;
 
-        // SVG dimensions and center
         let svg_size = 600.0;
         let svg_center = svg_size / 2.0;
 
-        // SVG header
         writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>")?;
         writeln!(file, "<svg width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\" xmlns=\"http://www.w3.org/2000/svg\">",
                  svg_size, svg_size, svg_size, svg_size)?;
 
-        // Outer circle
         writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" stroke=\"gray\" stroke-width=\"3\" fill=\"none\" />",
                  svg_center, svg_center, CIRCLE_RADIUS)?;
 
-        // Helper closure to convert relative to SVG coordinates
         let transform_point = |relative_pos: Vec2| -> (f32, f32) {
             (svg_center + relative_pos.x, svg_center + relative_pos.y)
         };
 
-        // Draw the sigil lines as a polyline
         if self.points.len() > 1 {
             let points_str: Vec<String> = self.points.iter()
                 .map(|p| {
@@ -180,14 +158,11 @@ impl SigilApp {
                      points_str.join(" "))?;
         }
 
-        // Draw start (green) and end (red) points
         if !self.points.is_empty() {
-            // Start point
             let (start_x, start_y) = transform_point(self.points[0].relative_pos);
             writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"10\" fill=\"green\" />",
                      start_x, start_y)?;
 
-            // End point (if more than one point)
             if self.points.len() > 1 {
                 let last_idx = self.points.len() - 1;
                 let (end_x, end_y) = transform_point(self.points[last_idx].relative_pos);
@@ -196,22 +171,17 @@ impl SigilApp {
             }
         }
 
-        // Draw the intention text at the bottom of the SVG
         writeln!(file, "<text x=\"{}\" y=\"{}\" font-size=\"20\" text-anchor=\"middle\" fill=\"black\">{}</text>",
                  svg_center, svg_size - 30.0, self.intention)?;
 
-        // Close SVG
         writeln!(file, "</svg>")?;
 
         Ok(())
     }
 
-    /// Handle text input, cursor movement, and selection (ASCII only)
     fn handle_text_input(&mut self) {
-        // Handle character input (ASCII alphanumeric and space only)
         while let Some(ch) = get_char_pressed() {
             if ch.is_ascii_alphanumeric() || ch == ' ' {
-                // If there's a selection, delete it first
                 if let Some(start) = self.selection_start {
                     let (start, end) = if start < self.cursor_pos {
                         (start, self.cursor_pos)
@@ -222,7 +192,6 @@ impl SigilApp {
                     self.cursor_pos = start;
                     self.selection_start = None;
                 }
-                // Insert character at cursor
                 if self.intention.len() < 100 {
                     self.intention.insert(self.cursor_pos, ch);
                     self.cursor_pos += 1;
@@ -230,10 +199,8 @@ impl SigilApp {
             }
         }
 
-        // Handle backspace
         if is_key_pressed(KeyCode::Backspace) {
             if let Some(start) = self.selection_start {
-                // Delete selection
                 let (start, end) = if start < self.cursor_pos {
                     (start, self.cursor_pos)
                 } else {
@@ -243,16 +210,13 @@ impl SigilApp {
                 self.cursor_pos = start;
                 self.selection_start = None;
             } else if self.cursor_pos > 0 {
-                // Delete character before cursor
                 self.cursor_pos -= 1;
                 self.intention.remove(self.cursor_pos);
             }
         }
 
-        // Handle delete
         if is_key_pressed(KeyCode::Delete) {
             if let Some(start) = self.selection_start {
-                // Delete selection
                 let (start, end) = if start < self.cursor_pos {
                     (start, self.cursor_pos)
                 } else {
@@ -262,15 +226,12 @@ impl SigilApp {
                 self.cursor_pos = start;
                 self.selection_start = None;
             } else if self.cursor_pos < self.intention.len() {
-                // Delete character after cursor
                 self.intention.remove(self.cursor_pos);
             }
         }
 
-        // Handle left arrow (with/without selection)
         if is_key_pressed(KeyCode::Left) {
             if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
-                // Extend selection left
                 if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
                     if self.selection_start.is_none() {
@@ -278,7 +239,6 @@ impl SigilApp {
                     }
                 }
             } else {
-                // Move cursor left
                 if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
                 }
@@ -286,10 +246,8 @@ impl SigilApp {
             }
         }
 
-        // Handle right arrow (with/without selection)
         if is_key_pressed(KeyCode::Right) {
             if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
-                // Extend selection right
                 if self.cursor_pos < self.intention.len() {
                     if self.selection_start.is_none() {
                         self.selection_start = Some(self.cursor_pos);
@@ -297,7 +255,6 @@ impl SigilApp {
                     self.cursor_pos += 1;
                 }
             } else {
-                // Move cursor right
                 if self.cursor_pos < self.intention.len() {
                     self.cursor_pos += 1;
                 }
@@ -305,7 +262,6 @@ impl SigilApp {
             }
         }
 
-        // Handle Home/End keys
         if is_key_pressed(KeyCode::Home) {
             if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
                 if self.selection_start.is_none() {
@@ -327,13 +283,11 @@ impl SigilApp {
             self.cursor_pos = self.intention.len();
         }
 
-        // Handle Ctrl+A (Select All)
         if is_key_pressed(KeyCode::A) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
             self.selection_start = Some(0);
             self.cursor_pos = self.intention.len();
         }
 
-        // Handle Ctrl+C (Copy) - prints to console for now
         if is_key_pressed(KeyCode::C) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
             if let Some(start) = self.selection_start {
                 let (start, end) = if start < self.cursor_pos {
@@ -346,11 +300,9 @@ impl SigilApp {
             }
         }
 
-        // Handle Ctrl+V (Paste) - inserts placeholder text for now
         if is_key_pressed(KeyCode::V) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
-            let paste_text = "pasted_text"; // Placeholder for clipboard
+            let paste_text = "pasted_text";
             if self.intention.len() + paste_text.len() <= 100 {
-                // Delete selection if any
                 if let Some(start) = self.selection_start {
                     let (start, end) = if start < self.cursor_pos {
                         (start, self.cursor_pos)
@@ -361,7 +313,6 @@ impl SigilApp {
                     self.cursor_pos = start;
                     self.selection_start = None;
                 }
-                // Insert pasted text (ASCII only)
                 for ch in paste_text.chars() {
                     if ch.is_ascii_alphanumeric() || ch == ' ' {
                         self.intention.insert(self.cursor_pos, ch);
@@ -371,7 +322,6 @@ impl SigilApp {
             }
         }
 
-        // Handle Ctrl+X (Cut) - prints to console for now
         if is_key_pressed(KeyCode::X) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
             if let Some(start) = self.selection_start {
                 let (start, end) = if start < self.cursor_pos {
@@ -388,11 +338,9 @@ impl SigilApp {
         }
     }
 
-    /// Update the application state each frame
     fn update(&mut self) {
         self.blink_timer += get_frame_time();
 
-        // Handle save timer
         if matches!(self.state, State::Saving) {
             self.save_timer += get_frame_time();
             if self.save_timer > 1.0 {
@@ -401,24 +349,20 @@ impl SigilApp {
             }
         }
 
-        // State machine for the app
         match &mut self.state {
             State::Start => {
-                // Consume any character input
                 while get_char_pressed().is_some() {}
                 if is_key_pressed(KeyCode::Space) {
                     self.state = State::Input;
                 }
             }
             State::Input => {
-                // Handle text input and editing
                 self.handle_text_input();
                 if is_key_pressed(KeyCode::Enter) && !self.intention.trim().is_empty() {
                     self.generate_sigil();
                 }
             }
             State::Display => {
-                // Consume any character input
                 while get_char_pressed().is_some() {}
                 if is_key_pressed(KeyCode::Space) && self.points.len() > 1 {
                     self.state = State::Animating { progress: 0.0, line: 0 };
@@ -432,9 +376,7 @@ impl SigilApp {
                 }
             }
             State::Animating { progress, line } => {
-                // Consume any character input
                 while get_char_pressed().is_some() {}
-                // Animate the drawing of the sigil
                 *progress += get_frame_time() * ANIMATION_SPEED;
                 if *progress >= 1.0 {
                     *progress = 0.0;
@@ -445,13 +387,11 @@ impl SigilApp {
                 }
             }
             State::Saving => {
-                // Consume any character input
                 while get_char_pressed().is_some() {}
             }
         }
     }
 
-    /// Reset the app to the input state
     fn reset(&mut self) {
         self.state = State::Input;
         self.intention.clear();
@@ -461,7 +401,6 @@ impl SigilApp {
         self.selection_start = None;
     }
 
-    /// Draw the current frame
     fn draw(&self) {
         clear_background(Color::from_rgba(10, 5, 20, 255));
         match &self.state {
@@ -476,7 +415,6 @@ impl SigilApp {
         }
     }
 
-    /// Draw the start screen
     fn draw_start(&self) {
         let center = self.get_center();
         draw_text_ex(
@@ -501,12 +439,9 @@ impl SigilApp {
         );
     }
 
-    /// Draw the input screen with text box, cursor, and selection
     fn draw_input(&self) {
         let center = self.get_center();
-        // Draw the main circle
         draw_circle_lines(center.x, center.y, CIRCLE_RADIUS, 3.0, GRAY);
-        // Instructions
         draw_text_ex(
             "Enter your intention:",
             center.x - 150.0,
@@ -517,12 +452,9 @@ impl SigilApp {
                 ..Default::default()
             },
         );
-        // Blinking cursor
         let cursor = if (self.blink_timer * 2.0) as i32 % 2 == 0 { "|" } else { " " };
-        // Text box position
         let text_x = center.x - 200.0;
         let text_y = center.y - 100.0;
-        // Draw selection background if any
         if let Some(selection_start) = self.selection_start {
             let (start, end) = if selection_start < self.cursor_pos {
                 (selection_start, self.cursor_pos)
@@ -541,7 +473,6 @@ impl SigilApp {
                 Color::from_rgba(100, 150, 255, 100),
             );
         }
-        // Draw the text
         draw_text_ex(
             &self.intention,
             text_x,
@@ -552,7 +483,6 @@ impl SigilApp {
                 ..Default::default()
             },
         );
-        // Draw the cursor at the correct position
         let cursor_x = text_x + measure_text(&self.intention[..self.cursor_pos], None, 20, 1.0).width;
         draw_text_ex(
             cursor,
@@ -564,7 +494,6 @@ impl SigilApp {
                 ..Default::default()
             },
         );
-        // Input instructions
         draw_text_ex(
             "Press ENTER when done",
             center.x - 120.0,
@@ -577,15 +506,12 @@ impl SigilApp {
         );
     }
 
-    /// Draw the sigil and its points, optionally animating the lines
     fn draw_sigil(&self, animation: Option<(usize, f32)>) {
         let center = self.get_center();
-        // Draw the main circle
         draw_circle_lines(center.x, center.y, CIRCLE_RADIUS, 3.0, GRAY);
         if self.points.is_empty() {
             return;
         }
-        // Draw completed lines
         let completed_lines = match animation {
             Some((current_line, _)) => current_line,
             None => self.points.len() - 1,
@@ -604,7 +530,6 @@ impl SigilApp {
                 );
             }
         }
-        // Draw the currently animating line
         if let Some((current_line, progress)) = animation {
             if current_line + 1 < self.points.len() {
                 let start_pos = self.get_absolute_pos(&self.points[current_line]);
@@ -613,7 +538,6 @@ impl SigilApp {
                 draw_line(start_pos.x, start_pos.y, current_pos.x, current_pos.y, 3.0, SKYBLUE);
             }
         }
-        // Draw the points with numbers
         for (i, point) in self.points.iter().enumerate() {
             let pos = self.get_absolute_pos(point);
             let color = if i == 0 {
@@ -624,7 +548,6 @@ impl SigilApp {
                 ORANGE
             };
             draw_circle(pos.x, pos.y, 10.0, color);
-            // Draw the number inside the circle
             let number_text = point.number.to_string();
             let text_size = measure_text(&number_text, None, 16, 1.0);
             draw_text_ex(
@@ -638,7 +561,6 @@ impl SigilApp {
                 },
             );
         }
-        // Display instructions at the bottom
         if matches!(self.state, State::Display) {
             draw_text_ex(
                 "SPACE: Animate | R: Reset | S: Save",
@@ -653,10 +575,8 @@ impl SigilApp {
         }
     }
 
-    /// Draw the 'Sigil Saved!' message overlay
     fn draw_saving_message(&self) {
         let center = self.get_center();
-        // Draw a semi-transparent background
         draw_rectangle(
             center.x - 150.0,
             center.y - 50.0,
@@ -664,7 +584,6 @@ impl SigilApp {
             100.0,
             Color::from_rgba(0, 0, 0, 200),
         );
-        // Draw the message
         draw_text_ex(
             "Sigil Saved!",
             center.x - 60.0,
@@ -678,8 +597,36 @@ impl SigilApp {
     }
 }
 
-/// Main entry point for the Macroquad application
-#[macroquad::main("Chaos Sigil Generator")]
+// Windows-specific configuration
+#[cfg(target_os = "windows")]
+fn window_conf() -> macroquad::prelude::Conf {
+    macroquad::prelude::Conf {
+        window_title: "Chaos Sigil Generator".to_owned(),
+        window_width: 800,
+        window_height: 600,
+        high_dpi: true,
+        platform: macroquad::prelude::Platform {
+            linux_backend: macroquad::prelude::LinuxBackend::X11Only, // Helps with some Windows GL issues
+            swap_interval: Some(1), // Enable vsync
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+// Default configuration for non-Windows platforms
+#[cfg(not(target_os = "windows"))]
+fn window_conf() -> macroquad::prelude::Conf {
+    macroquad::prelude::Conf {
+        window_title: "Chaos Sigil Generator".to_owned(),
+        window_width: 800,
+        window_height: 600,
+        high_dpi: true,
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(window_conf)]
 async fn main() {
     let mut app = SigilApp::new();
     loop {
