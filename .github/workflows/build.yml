@@ -1,18 +1,24 @@
 name: Build and Release
 
-on: push
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write  # needed for creating tags/releases
 
 jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev
-      
+
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -20,18 +26,18 @@ jobs:
           toolchain: stable
           override: true
           target: x86_64-unknown-linux-gnu
-      
+
       - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --release --target x86_64-unknown-linux-gnu
-      
+
       - name: Prepare artifact
         run: |
           mkdir -p release
           cp target/x86_64-unknown-linux-gnu/release/sigil-gen release/sigil-gen-linux
-      
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
@@ -42,12 +48,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64
-      
+
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -55,23 +61,68 @@ jobs:
           toolchain: stable
           override: true
           target: x86_64-pc-windows-gnu
-      
-      - name: Add Windows target
-        run: rustup target add x86_64-pc-windows-gnu
-      
+
       - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --release --target x86_64-pc-windows-gnu
-      
+
       - name: Prepare artifact
         run: |
           mkdir -p release
           cp target/x86_64-pc-windows-gnu/release/sigil-gen.exe release/sigil-gen-windows.exe
-      
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: sigil-gen-windows
           path: release/sigil-gen-windows.exe
+
+  release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          TAG=$(git tag --sort=-v:refname | head -n 1)
+          echo "latest tag: $TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create new tag
+        id: tag
+        run: |
+          TAG=${{ steps.get_tag.outputs.tag }}
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            IFS='.' read -ra PARTS <<< "${TAG:1}"
+            MAJOR=${PARTS[0]}
+            MINOR=${PARTS[1]}
+            PATCH=${PARTS[2]}
+            NEW_TAG="v$MAJOR.$MINOR.$((PATCH+1))"
+          else
+            NEW_TAG="v0.1.0"
+          fi
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag $NEW_TAG
+          git push origin $NEW_TAG
+          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.new_tag }}
+          name: ${{ steps.tag.outputs.new_tag }}
+          files: |
+            artifacts/sigil-gen-linux/sigil-gen-linux
+            artifacts/sigil-gen-windows/sigil-gen-windows.exe
