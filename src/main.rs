@@ -5,6 +5,11 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+// TODO: Figure out why it doesn't wanna work on Windows Proper (in QEMU) but it works under WINE
+// TODO: This code could probably be somewhat refactored
+
+
+
 // Constants for the sigil's appearance and animation
 const CIRCLE_RADIUS: f32 = 250.0; // Radius of the main circle
 const ANIMATION_SPEED: f32 = 3.0; // Speed of the sigil drawing animation
