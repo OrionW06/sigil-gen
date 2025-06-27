@@ -1,8 +1,6 @@
 use macroquad::prelude::*;
 use std::collections::HashSet;
 use std::f32::consts::PI;
-use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 
 // TODO: Figure out why it doesn't wanna work on Windows Proper (in QEMU) but it works under WINE
@@ -135,8 +133,9 @@ impl SigilApp {
         self.state = State::Display;
     }
 
-    /// Save the current sigil as an SVG file
+    /// Save the current sigil as a PNG file
     fn save_sigil(&self) -> std::io::Result<()> {
+        use macroquad::texture::Image;
         // Create output directory if it doesn't exist
         let dir = "sigils";
         if !Path::new(dir).exists() {
@@ -149,66 +148,92 @@ impl SigilApp {
             .chars()
             .filter(|c| c.is_ascii_alphanumeric())
             .collect::<String>();
-        let filename = format!("{}/sigil_{}_{}.svg", dir, timestamp, sanitized_intention);
+        let filename = format!("{}/sigil_{}_{}.png", dir, timestamp, sanitized_intention);
 
-        // Create SVG file
-        let mut file = File::create(filename)?;
+        // PNG dimensions and center
+        let img_size = 600u16;
+        let img_center = img_size as f32 / 2.0;
+        let mut image = Image::gen_image_color(img_size, img_size, Color::from_rgba(10, 5, 20, 255));
 
-        // SVG dimensions and center
-        let svg_size = 600.0;
-        let svg_center = svg_size / 2.0;
-
-        // SVG header
-        writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>")?;
-        writeln!(file, "<svg width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\" xmlns=\"http://www.w3.org/2000/svg\">",
-                 svg_size, svg_size, svg_size, svg_size)?;
-
-        // Outer circle
-        writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" stroke=\"gray\" stroke-width=\"3\" fill=\"none\" />",
-                 svg_center, svg_center, CIRCLE_RADIUS)?;
-
-        // Helper closure to convert relative to SVG coordinates
-        let transform_point = |relative_pos: Vec2| -> (f32, f32) {
-            (svg_center + relative_pos.x, svg_center + relative_pos.y)
+        // Helper closure to convert relative to image coordinates
+        let transform_point = |relative_pos: Vec2| -> (u32, u32) {
+            let x = (img_center + relative_pos.x).round().clamp(0.0, (img_size - 1) as f32) as u32;
+            let y = (img_center + relative_pos.y).round().clamp(0.0, (img_size - 1) as f32) as u32;
+            (x, y)
         };
 
-        // Draw the sigil lines as a polyline
-        if self.points.len() > 1 {
-            let points_str: Vec<String> = self.points.iter()
-                .map(|p| {
-                    let (x, y) = transform_point(p.relative_pos);
-                    format!("{},{}", x, y)
-                })
-                .collect();
+        // Draw the main circle (using Bresenham's algorithm for a circle)
+        let r = CIRCLE_RADIUS.round() as i32;
+        let cx = img_center.round() as i32;
+        let cy = img_center.round() as i32;
+        for t in 0..360 {
+            let theta = (t as f32).to_radians();
+            let x = (cx as f32 + r as f32 * theta.cos()).round() as i32;
+            let y = (cy as f32 + r as f32 * theta.sin()).round() as i32;
+            if x >= 0 && x < img_size as i32 && y >= 0 && y < img_size as i32 {
+                image.set_pixel(x as u32, y as u32, GRAY);
+            }
+        }
 
-            writeln!(file, "<polyline points=\"{}\" fill=\"none\" stroke=\"#87ceeb\" stroke-width=\"3\" />",
-                     points_str.join(" "))?;
+        // Draw the sigil lines
+        if self.points.len() > 1 {
+            for i in 0..self.points.len() - 1 {
+                let (x0, y0) = transform_point(self.points[i].relative_pos);
+                let (x1, y1) = transform_point(self.points[i + 1].relative_pos);
+                draw_line_on_image(&mut image, x0, y0, x1, y1, SKYBLUE);
+            }
         }
 
         // Draw start (green) and end (red) points
         if !self.points.is_empty() {
-            // Start point
             let (start_x, start_y) = transform_point(self.points[0].relative_pos);
-            writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"10\" fill=\"green\" />",
-                     start_x, start_y)?;
-
-            // End point (if more than one point)
+            draw_circle_on_image(&mut image, start_x, start_y, 10, GREEN);
             if self.points.len() > 1 {
-                let last_idx = self.points.len() - 1;
-                let (end_x, end_y) = transform_point(self.points[last_idx].relative_pos);
-                writeln!(file, "<circle cx=\"{}\" cy=\"{}\" r=\"10\" fill=\"red\" />",
-                         end_x, end_y)?;
+                let (end_x, end_y) = transform_point(self.points[self.points.len() - 1].relative_pos);
+                draw_circle_on_image(&mut image, end_x, end_y, 10, RED);
             }
         }
-
-        // Draw the intention text at the bottom of the SVG
-        writeln!(file, "<text x=\"{}\" y=\"{}\" font-size=\"20\" text-anchor=\"middle\" fill=\"black\">{}</text>",
-                 svg_center, svg_size - 30.0, self.intention)?;
-
-        // Close SVG
-        writeln!(file, "</svg>")?;
-
+        // Draw intermediate points (orange) and numbers
+        for (i, point) in self.points.iter().enumerate() {
+            if i != 0 && i != self.points.len() - 1 {
+                let (x, y) = transform_point(point.relative_pos);
+                draw_circle_on_image(&mut image, x, y, 10, ORANGE);
+            }
+            // Draw the number as a single pixel (for now, as text rendering is nontrivial)
+            let (x, y) = transform_point(point.relative_pos);
+            image.set_pixel(x, y, BLACK);
+        }
+        // Save the image as PNG
+        image.export_png(&filename);
         Ok(())
+    }
+
+    /// Helper to get the (start, end) indices of the current selection, if any
+    fn selection_range(&self) -> Option<(usize, usize)> {
+        self.selection_start.map(|start| {
+            if start < self.cursor_pos {
+                (start, self.cursor_pos)
+            } else {
+                (self.cursor_pos, start)
+            }
+        })
+    }
+
+    /// Helper to delete the current selection, if any, and return true if something was deleted
+    fn delete_selection(&mut self) -> bool {
+        if let Some((start, end)) = self.selection_range() {
+            self.intention.drain(start..end);
+            self.cursor_pos = start;
+            self.selection_start = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Helper to check if Ctrl is held
+    fn ctrl_down() -> bool {
+        is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)
     }
 
     /// Handle text input, cursor movement, and selection (ASCII only)
@@ -216,18 +241,7 @@ impl SigilApp {
         // Handle character input (ASCII alphanumeric and space only)
         while let Some(ch) = get_char_pressed() {
             if ch.is_ascii_alphanumeric() || ch == ' ' {
-                // If there's a selection, delete it first
-                if let Some(start) = self.selection_start {
-                    let (start, end) = if start < self.cursor_pos {
-                        (start, self.cursor_pos)
-                    } else {
-                        (self.cursor_pos, start)
-                    };
-                    self.intention.drain(start..end);
-                    self.cursor_pos = start;
-                    self.selection_start = None;
-                }
-                // Insert character at cursor
+                self.delete_selection();
                 if self.intention.len() < 100 {
                     self.intention.insert(self.cursor_pos, ch);
                     self.cursor_pos += 1;
@@ -237,18 +251,7 @@ impl SigilApp {
 
         // Handle backspace
         if is_key_pressed(KeyCode::Backspace) {
-            if let Some(start) = self.selection_start {
-                // Delete selection
-                let (start, end) = if start < self.cursor_pos {
-                    (start, self.cursor_pos)
-                } else {
-                    (self.cursor_pos, start)
-                };
-                self.intention.drain(start..end);
-                self.cursor_pos = start;
-                self.selection_start = None;
-            } else if self.cursor_pos > 0 {
-                // Delete character before cursor
+            if !self.delete_selection() && self.cursor_pos > 0 {
                 self.cursor_pos -= 1;
                 self.intention.remove(self.cursor_pos);
             }
@@ -256,18 +259,7 @@ impl SigilApp {
 
         // Handle delete
         if is_key_pressed(KeyCode::Delete) {
-            if let Some(start) = self.selection_start {
-                // Delete selection
-                let (start, end) = if start < self.cursor_pos {
-                    (start, self.cursor_pos)
-                } else {
-                    (self.cursor_pos, start)
-                };
-                self.intention.drain(start..end);
-                self.cursor_pos = start;
-                self.selection_start = None;
-            } else if self.cursor_pos < self.intention.len() {
-                // Delete character after cursor
+            if !self.delete_selection() && self.cursor_pos < self.intention.len() {
                 self.intention.remove(self.cursor_pos);
             }
         }
@@ -275,7 +267,6 @@ impl SigilApp {
         // Handle left arrow (with/without selection)
         if is_key_pressed(KeyCode::Left) {
             if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
-                // Extend selection left
                 if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
                     if self.selection_start.is_none() {
@@ -283,7 +274,6 @@ impl SigilApp {
                     }
                 }
             } else {
-                // Move cursor left
                 if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
                 }
@@ -294,7 +284,6 @@ impl SigilApp {
         // Handle right arrow (with/without selection)
         if is_key_pressed(KeyCode::Right) {
             if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
-                // Extend selection right
                 if self.cursor_pos < self.intention.len() {
                     if self.selection_start.is_none() {
                         self.selection_start = Some(self.cursor_pos);
@@ -302,7 +291,6 @@ impl SigilApp {
                     self.cursor_pos += 1;
                 }
             } else {
-                // Move cursor right
                 if self.cursor_pos < self.intention.len() {
                     self.cursor_pos += 1;
                 }
@@ -333,40 +321,24 @@ impl SigilApp {
         }
 
         // Handle Ctrl+A (Select All)
-        if is_key_pressed(KeyCode::A) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
+        if is_key_pressed(KeyCode::A) && Self::ctrl_down() {
             self.selection_start = Some(0);
             self.cursor_pos = self.intention.len();
         }
 
         // Handle Ctrl+C (Copy) - prints to console for now
-        if is_key_pressed(KeyCode::C) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
-            if let Some(start) = self.selection_start {
-                let (start, end) = if start < self.cursor_pos {
-                    (start, self.cursor_pos)
-                } else {
-                    (self.cursor_pos, start)
-                };
+        if is_key_pressed(KeyCode::C) && Self::ctrl_down() {
+            if let Some((start, end)) = self.selection_range() {
                 let selected_text = &self.intention[start..end];
                 println!("Copied: {}", selected_text);
             }
         }
 
         // Handle Ctrl+V (Paste) - inserts placeholder text for now
-        if is_key_pressed(KeyCode::V) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
+        if is_key_pressed(KeyCode::V) && Self::ctrl_down() {
             let paste_text = "pasted_text"; // Placeholder for clipboard
             if self.intention.len() + paste_text.len() <= 100 {
-                // Delete selection if any
-                if let Some(start) = self.selection_start {
-                    let (start, end) = if start < self.cursor_pos {
-                        (start, self.cursor_pos)
-                    } else {
-                        (self.cursor_pos, start)
-                    };
-                    self.intention.drain(start..end);
-                    self.cursor_pos = start;
-                    self.selection_start = None;
-                }
-                // Insert pasted text (ASCII only)
+                self.delete_selection();
                 for ch in paste_text.chars() {
                     if ch.is_ascii_alphanumeric() || ch == ' ' {
                         self.intention.insert(self.cursor_pos, ch);
@@ -377,13 +349,8 @@ impl SigilApp {
         }
 
         // Handle Ctrl+X (Cut) - prints to console for now
-        if is_key_pressed(KeyCode::X) && (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) {
-            if let Some(start) = self.selection_start {
-                let (start, end) = if start < self.cursor_pos {
-                    (start, self.cursor_pos)
-                } else {
-                    (self.cursor_pos, start)
-                };
+        if is_key_pressed(KeyCode::X) && Self::ctrl_down() {
+            if let Some((start, end)) = self.selection_range() {
                 let selected_text = &self.intention[start..end];
                 println!("Cut: {}", selected_text);
                 self.intention.drain(start..end);
@@ -680,6 +647,51 @@ impl SigilApp {
                 ..Default::default()
             },
         );
+    }
+}
+
+// Helper functions for drawing lines and circles on Image
+fn draw_line_on_image(image: &mut macroquad::texture::Image, x0: u32, y0: u32, x1: u32, y1: u32, color: Color) {
+    let (mut x0, mut y0, x1, y1) = (x0 as i32, y0 as i32, x1 as i32, y1 as i32);
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+    let w = image.width() as u32;
+    let h = image.height() as u32;
+    loop {
+        if x0 >= 0 && y0 >= 0 && (x0 as u32) < w && (y0 as u32) < h {
+            image.set_pixel(x0 as u32, y0 as u32, color);
+        }
+        if x0 == x1 && y0 == y1 { break; }
+        let e2 = 2 * err;
+        if e2 >= dy { err += dy; x0 += sx; }
+        if e2 <= dx { err += dx; y0 += sy; }
+    }
+}
+fn draw_circle_on_image(image: &mut macroquad::texture::Image, cx: u32, cy: u32, radius: u32, color: Color) {
+    let (cx, cy, r) = (cx as i32, cy as i32, radius as i32);
+    let mut x = r;
+    let mut y = 0;
+    let mut err = 0;
+    let w = image.width() as u32;
+    let h = image.height() as u32;
+    while x >= y {
+        for &(dx, dy) in &[(x, y), (y, x), (-y, x), (-x, y), (-x, -y), (-y, -x), (y, -x), (x, -y)] {
+            let px = cx + dx;
+            let py = cy + dy;
+            if px >= 0 && py >= 0 && (px as u32) < w && (py as u32) < h {
+                image.set_pixel(px as u32, py as u32, color);
+            }
+        }
+        y += 1;
+        if err <= 0 {
+            err += 2 * y + 1;
+        } else {
+            x -= 1;
+            err -= 2 * x + 1;
+        }
     }
 }
 
