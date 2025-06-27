@@ -1,6 +1,11 @@
 name: Build and Release
 
-on: push
+on:
+  push:
+    branches:
+      - main # Or your default branch
+    tags:
+      - 'v*' # Trigger on version tags like v0.1.1
 
 jobs:
   build-linux:
@@ -75,3 +80,32 @@ jobs:
         with:
           name: sigil-gen-windows
           path: release/sigil-gen-windows.exe
+
+  create-release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') # Only run for version tags
+    steps:
+      - name: Download all workflow run artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/ # Download all artifacts to this directory
+
+      - name: List downloaded artifacts (for debugging)
+        run: ls -R artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          # The GITHUB_TOKEN is automatically provided by GitHub Actions
+          # token: ${{ secrets.GITHUB_TOKEN }} # This line is optional, token is default
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: "Automated release for version ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/sigil-gen-linux/sigil-gen-linux
+            artifacts/sigil-gen-windows/sigil-gen-windows.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
