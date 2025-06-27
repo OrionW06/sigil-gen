@@ -684,7 +684,7 @@ impl SigilApp {
 }
 
 /// Main entry point for the Macroquad application
-#[macroquad::main("Chaos Sigil Generator")]
+#[macroquad::main("Sigil-Gen")]
 async fn main() {
     let mut app = SigilApp::new();
     loop {
